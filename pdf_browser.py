@@ -9,6 +9,11 @@ import cv2
 import numpy as np
 import mediapipe as mp
 import math
+import time
+import win32con
+import ctypes
+import win32api
+
 
 
 # Capture video
@@ -37,21 +42,30 @@ def get_direction(prev_x, prev_y, x, y):
         return -1
     delta_x = x - prev_x
     delta_y = y - prev_y
-    if delta_y < 100 and delta_x < 100:
+    if abs(delta_y) < 75 and abs(delta_x) < 75:
         return -1
     if delta_x == 0:
-        direction = delta_y / abs(delta_y)
+        direction = 1 if delta_y > 0 else -1
     else: 
         slope = delta_y / delta_x
+        print("proper line, {}", slope)
         if -1 < slope <= 1:
             direction = 2 * delta_x / abs(delta_x)
         else: 
-            direction = 2 * delta_y / abs(delta_y)
-    return direction+2
+            direction = delta_y / abs(delta_y)
+    return int(direction)+2
+
+def control(direction):
+    key_code = [37, 38, 0, 40, 39]
+    mvka = ctypes.windll.user32.MapVirtualKeyA
+    win32api.keybd_event(key_code[direction], 0, 0, 0)
+    win32api.keybd_event(key_code[direction], 0, win32con.KEYEVENTF_KEYUP, 0)
 
 on = False
 L1=0
 L2=0
+prev_direc = -1
+new_command = True
 while True:
     ret, frame = cap.read()
 
@@ -63,19 +77,12 @@ while True:
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = hands.process(frame)
 
-    # draw the hand annotations on the frame
+    
     frame.flags.writeable = True
     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     if results.multi_hand_landmarks:
         # iterate through hands
         for hand_landmarks in results.multi_hand_landmarks:
-            mp_drawing.draw_landmarks(
-                frame,
-                hand_landmarks,
-                mp_hands.HAND_CONNECTIONS,
-                mp_drawing_styles.get_default_hand_landmarks_style(),
-                mp_drawing_styles.get_default_hand_connections_style())
-
             x_list=[]
             y_list=[]
 
@@ -87,24 +94,30 @@ while True:
             index_finger_Y = int(y_list[8] * screen_height)
             mid_finger_X = int(x_list[12] * screen_width)
             mid_finger_Y = int(y_list[12] * screen_height)
+            x = (index_finger_X+mid_finger_X)/2
+            y = (index_finger_Y+mid_finger_Y)/2
 
             finger_dis = math.hypot((index_finger_X-mid_finger_X), (index_finger_Y-mid_finger_Y))
 
-            prev_direc = -1
-            prev_x = 0
-            prev_y = 0
             # whether termination
-            if finger_dis < 60:
-                direction = get_direction(prev_x, prev_y, (index_finger_X+mid_finger_X)/2, (index_finger_Y+mid_finger_Y)/2)
-                if direction == prev_direc:
-                    print(direction)
-                    prev_direc=direction
+            if finger_dis < 30:
+                if new_command:
+                    prev_x = x
+                    prev_y = y
+                    new_command = False
+                    time.sleep(0.3)
+                else:
+                    direction = get_direction(prev_x, prev_y, x, y)
+                    cv2.line(frame, (int(prev_x), int(prev_y)), (int(x),int(y)), (255,0,0), 10, cv2.LINE_4)
+                    if direction != -1:
+                        control(direction)
+                        new_command = True
+                        time.sleep(1)
+                        
             else:
-                prev_direc=0
-
-    # show each frame
-    cv2.imshow("demo", frame)
-
+                new_command = True
+            break
+    
     if cv2.waitKey(10) & 0xFF == ord('q'):
         break
 
